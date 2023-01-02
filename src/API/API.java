@@ -4,6 +4,9 @@ import static spark.Spark.get;
 import static spark.Spark.initExceptionHandler;
 import Model.Flight;
 import Model.Histogram;
+import java.time.DayOfWeek;
+import java.util.Comparator;
+import java.util.Set;
 import java.util.TreeSet;
 
 public class API {
@@ -13,29 +16,46 @@ public class API {
     public static void createAPI(Iterable<Flight> flights) {
         API.flights = flights;
         initExceptionHandler((e) -> System.out.println("Initialization failed"));
-        get("/:dimension", (req, res) -> constructString(req.params(":dimension"), null, null));
-        get("/:dimension/bin/:bin", (req, res) -> constructString(req.params(":dimension"), null, req.params(":bin")));
-        get("/:dimension/:filter", (req, res) -> constructString(req.params(":dimension"), req.params(":filter"), null));
-        get("/:dimension/:filter/bin/:bin", (req, res) -> constructString(req.params(":dimension"), req.params(":filter"), req.params(":bin")));
+        get("/:dimension", (req, res) -> constructString(req.params(":dimension"), null));
+        get("/:dimension/:bin", (req, res) -> constructString(req.params(":dimension"), req.params(":bin")));
     }
     
-    private static String constructString(String dimension, String filter, String bin) {
-        String result = "{\"dimension\": \""+dimension+"\",\"filter\": \""+filter+"\",\"binsize\": \""+bin+"\",\"values\": {";
+    private static String constructString(String dimension, String bin) {
+        String result = "{\"dimension\": \""+dimension+"\",\"binsize\": "+bin+",\"values\": [";
         try {
-            histogram(dimension.toLowerCase(), filter, bin != null ? Integer.parseInt(bin) : null);
+            histogram(dimension.toLowerCase(), bin != null ? Integer.parseInt(bin) : null);
         } catch (Exception e) {
             return e.getMessage();
         }
-        for (Object key : new TreeSet<>(histogram.getKeySet())) result += "\""+String.valueOf(key).toLowerCase()+"\": \""+histogram.getValue(key)+"\",";
-        return result.substring(0, result.length()-1) + "}}";
+        for (Object key : sortKeys(histogram.getKeySet(), dimension)) result += "{\""+String.valueOf(key).toLowerCase()+"\": "+histogram.getValue(key)+"},";
+        return result.substring(0, result.length()-1) + "]}";
     }
     
-    private static void histogram(String dimension, String filter, Integer bin) throws Exception {
+    private static TreeSet<Object> sortKeys(Set<Object> keySet, String dimension) {
+        if(dimension.equals("day_of_week")) {
+            TreeSet<Object> daysOfWeekSet = new TreeSet<>(new DayOfWeekComparator());
+            for (Object key : keySet) 
+                daysOfWeekSet.add(key);
+            return daysOfWeekSet;
+        }
+        return new TreeSet<>(keySet);
+    }
+    
+    private static class DayOfWeekComparator implements Comparator<Object> {
+        @Override
+        public int compare(Object day1, Object day2) {
+            DayOfWeek dow1 = DayOfWeek.valueOf((String) day1);
+            DayOfWeek dow2 = DayOfWeek.valueOf((String) day2);
+            return dow1.compareTo(dow2);
+        }
+    }
+    
+    private static void histogram(String dimension, Integer bin) throws Exception {
         histogram = new Histogram<>();
         switch(dimension) {
             case "day_of_week":
                 for (Flight flight : flights) 
-                    histogram.increment(flight.getDayOfWeek().toString());
+                    histogram.increment(bin == null ? flight.getDayOfWeek().toString() : flight.getDayOfWeek().getValue() / bin);
                 break;
             case "dep_time":
                 for (Flight flight : flights) 
